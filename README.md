@@ -12,10 +12,8 @@ With URL:
 ```
 {
     "OrderId": "9d435e23-3658-55b4-bee3-40827230bbab",
-    "OrderDate": "2023-02-24 10:00",
-    "PaymentMethod": "QRIS",
-    "CendolCount": 1,
-    "AdminFees": 40,
-    "Total": 5040
+    "OrderDate": "2024-03-17",
+    "Total": 5000,
+    "PaymentSource": "Saweria"
 }
 ```
