@@ -1,49 +1,100 @@
-<?php // https://github.com/jovanzers/Saweria
+<?php
+error_reporting(0);
+header('Content-Type: application/json');
+
 if (empty($_GET['oid'])) {
-    echo '<a href="https://github.com/jovanzers/Saweria">How to use?</a><hr>';
-    echo 'ZERS was here!<br>With ❤️ by WinTen Dev';
-    exit();
+    echo json_encode([
+        'IsValid' => false,
+        'Message' => 'Parameter oid kosong',
+        'Usage' => 'https://github.com/jovanzers/Saweria'
+    ]);
+    exit;
 }
 
-$oid = $_GET['oid'];
-$url = $oid;
-if (strpos($oid, 'saweria.co') === false) {
-    $url = 'https://saweria.co/receipt/' . $oid;
-}
+$oid = trim($_GET['oid']);
+$url = (strpos($oid, 'saweria.co') !== false)
+    ? $oid
+    : 'https://saweria.co/receipt/' . $oid;
+
 $ch = curl_init($url);
 curl_setopt_array($ch, [
     CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_FOLLOWLOCATION => true,
+    CURLOPT_TIMEOUT => 15,
     CURLOPT_HTTPHEADER => [
         'Referer: https://saweria.co',
-        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36'
+        'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/117.0.0.0'
     ]
 ]);
-$response = curl_exec($ch);
-curl_close($ch);
-// echo $response;
-$dom = new DOMDocument();
-@$dom->loadHTML($response);
 
-$xpath = new DOMXPath($dom);
-$orderId = $xpath->query('//*[@id="__next"]/div/div/div[5]/input');
-$orderDate = $xpath->query('//*[@id="__next"]/div/div/div[3]/input');
-$amount = $xpath->query('//*[@id="__next"]/div/div/h3[2]');
-if (strpos($response, 'Berhasil') !== false) {
-    $result = [
-        'OrderId' => @$orderId->item(0)->getAttribute('value'),
-        'OrderDate' => date('Y-m-d', strtotime(str_replace('Rp&nbsp;', '', @$orderDate->item(0)->getAttribute('value')))),
-        'Total' => (int) preg_replace('/[^0-9]/', '', @$amount[0]->nodeValue),
-        'PaymentSource' => 'Saweria'
-    ];
-} else {
-    $result = [
+$response = curl_exec($ch);
+$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+
+if (!$response || $httpCode !== 200) {
+    echo json_encode([
         'IsValid' => false,
-        'Message' => 'Transaksi tidak terdaftar atau belum terselesaikan.',
-        'html' => $response
-    ];
-    // echo $response;
-    // exit();
+        'Message' => 'Gagal mengambil data dari Saweria'
+    ]);
+    exit;
 }
 
-header('Content-Type: application/json');
+if (stripos($response, 'Berhasil') === false) {
+    echo json_encode([
+        'IsValid' => false,
+        'Message' => 'Transaksi tidak ditemukan atau belum selesai'
+    ]);
+    exit;
+}
+
+libxml_use_internal_errors(true);
+$dom = new DOMDocument();
+@$dom->loadHTML($response);
+$xpath = new DOMXPath($dom);
+
+$inputs = $xpath->query('//input');
+$orderId = null;
+$orderDate = null;
+
+foreach ($inputs as $input) {
+    $val = trim($input->getAttribute('value'));
+
+    if (!$orderId && preg_match('/^[a-f0-9\-]{20,}$/i', $val)) {
+        $orderId = $val;
+        continue;
+    }
+
+    if (!$orderDate && preg_match('/\d{2}[-\/]\d{2}[-\/]\d{4}/', $val)) {
+        $orderDate = $val;
+        continue;
+    }
+}
+
+$amount = null;
+$h3s = $xpath->query('//h3');
+
+foreach ($h3s as $h3) {
+    $text = trim($h3->nodeValue);
+    if (preg_match('/Rp|IDR|[0-9]\./', $text)) {
+        $amount = $text;
+        break;
+    }
+}
+
+if (!$orderId || !$orderDate || !$amount) {
+    echo json_encode([
+        'IsValid' => false,
+        'Message' => 'Struktur halaman berubah atau data tidak lengkap'
+    ]);
+    exit;
+}
+
+$result = [
+    'IsValid' => true,
+    'OrderId' => $orderId,
+    'OrderDate' => date('Y-m-d', strtotime($orderDate)),
+    'Total' => (int) preg_replace('/[^0-9]/', '', $amount),
+    'PaymentSource' => 'Saweria'
+];
+
 echo json_encode($result);
